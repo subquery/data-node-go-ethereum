@@ -167,7 +167,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		}
 
 		blockchain.chainmu.MustLock()
-		rawdb.WriteBlock(blockchain.db, block)
+		rawdb.WriteBlock(blockchain.db, block, blockchain.Config())
 		statedb.Commit(block.NumberU64(), false, false)
 		blockchain.chainmu.Unlock()
 	}

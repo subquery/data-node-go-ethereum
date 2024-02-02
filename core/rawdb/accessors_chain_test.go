@@ -126,7 +126,7 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	// Write and verify the block in the database
-	WriteBlock(db, block)
+	WriteBlock(db, block, params.TestChainConfig)
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
@@ -439,7 +439,7 @@ func TestAncientStorage(t *testing.T) {
 	}
 
 	// Write and verify the header in the database
-	WriteAncientBlocks(db, []*types.Block{block}, []types.Receipts{nil})
+	WriteAncientBlocks(db, []*types.Block{block}, []types.Receipts{nil}, params.TestChainConfig)
 
 	if blob := ReadHeaderRLP(db, hash, number); len(blob) == 0 {
 		t.Fatalf("no header returned")
@@ -567,7 +567,7 @@ func BenchmarkWriteAncientBlocks(b *testing.B) {
 
 		blocks := allBlocks[i : i+length]
 		receipts := batchReceipts[:length]
-		writeSize, err := WriteAncientBlocks(db, blocks, receipts)
+		writeSize, err := WriteAncientBlocks(db, blocks, receipts, params.TestChainConfig)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -867,11 +867,11 @@ func TestHeadersRLPStorage(t *testing.T) {
 	}
 	receipts := make([]types.Receipts, 100)
 	// Write first half to ancients
-	WriteAncientBlocks(db, chain[:50], receipts[:50])
+	WriteAncientBlocks(db, chain[:50], receipts[:50], params.TestChainConfig)
 	// Write second half to db
 	for i := 50; i < 100; i++ {
 		WriteCanonicalHash(db, chain[i].Hash(), chain[i].NumberU64())
-		WriteBlock(db, chain[i])
+		WriteBlock(db, chain[i], params.TestChainConfig)
 	}
 	checkSequence := func(from, amount int) {
 		headersRlp := ReadHeaderRange(db, uint64(from), uint64(amount))
@@ -899,4 +899,48 @@ func TestHeadersRLPStorage(t *testing.T) {
 	checkSequence(0, 1)    // Only genesis
 	checkSequence(1, 1)    // Only block 1
 	checkSequence(1, 2)    // Genesis + block 1
+}
+
+func TestTxBloomStorage(t *testing.T) {
+	db := NewMemoryDatabase()
+
+	hash, number := common.HexToHash("0x01"), uint64(1)
+
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	signer := types.LatestSignerForChainID(big.NewInt(8))
+
+	// Create transactions.
+	txs := make([]*types.Transaction, 5)
+	for i := 0; i < len(txs); i++ {
+		var err error
+		to := common.Address{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
+		txs[i], err = types.SignNewTx(key, signer, &types.LegacyTx{
+			Nonce:    2,
+			GasPrice: big.NewInt(30000),
+			Gas:      0x45454545,
+			To:       &to,
+		})
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	want, err := types.TransactionsBloom(txs, signer)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	WriteTxBloom(db, hash, number, &want)
+	have := ReadTxBloom(db, hash, number)
+
+	if !bytes.Equal(want, *have) {
+		t.Fatalf("Bloom values don't match want: %v, have: %v", want, *have)
+	}
+
+	DeleteTxBloom(db, hash, number)
+	if txb := ReadTxBloom(db, hash, number); txb != nil {
+		t.Fatalf("deleted tx bloom returned: %v", txb)
+	}
+
+	// TODO test tx bloom removed when block removed
 }

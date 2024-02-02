@@ -544,7 +544,7 @@ func (g *Genesis) Commit(db ethdb.Database, triedb *triedb.Database) (*types.Blo
 	}
 	batch := db.NewBatch()
 	rawdb.WriteGenesisStateSpec(batch, block.Hash(), blob)
-	rawdb.WriteBlock(batch, block)
+	rawdb.WriteBlock(batch, block, config)
 	rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), nil)
 	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
 	rawdb.WriteHeadBlockHash(batch, block.Hash())
