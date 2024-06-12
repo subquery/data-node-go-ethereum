@@ -109,13 +109,9 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 			hc.earliestHeaderHash = shead.Hash()
 		}
 		if dataConfig.DesiredChainDataEnd != nil {
-			// TODO this could be in the futrue and should throw
 			if chead := hc.GetHeaderByNumber(*dataConfig.DesiredChainDataEnd); chead != nil {
 				hc.currentHeader.Store(chead)
 				hc.currentHeaderHash = chead.Hash()
-			} else {
-				// TODO should this throw?
-				return nil, fmt.Errorf("Failed to get header for current height %d", *dataConfig.DesiredChainDataEnd)
 			}
 		}
 	}
@@ -683,7 +679,6 @@ func (hc *HeaderChain) SetTail(tail uint64, delFn DeleteBlockContentCallback) er
 
 	batch := hc.chainDb.NewBatch()
 
-	// TODO handle any pending ancients data
 	frozen, err := hc.chainDb.Ancients()
 	if err != nil {
 		return err
