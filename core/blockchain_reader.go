@@ -63,6 +63,10 @@ func (bc *BlockChain) CurrentSafeBlock() *types.Header {
 	return bc.currentSafeBlock.Load()
 }
 
+func (bc *BlockChain) EarliestBlock() *types.Header {
+	return bc.earliestBlock.Load()
+}
+
 // HasHeader checks if a block header is present in the database or not, caching
 // it if present.
 func (bc *BlockChain) HasHeader(hash common.Hash, number uint64) bool {
@@ -448,7 +452,6 @@ func (bc *BlockChain) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscript
 func (bc *BlockChain) SubscribeBlockProcessingEvent(ch chan<- bool) event.Subscription {
 	return bc.scope.Track(bc.blockProcFeed.Subscribe(ch))
 }
-
 
 // GetTxBloom retrieves the Transactions Bloom for the given block
 // TODO this is a temporary function for development so there is no caching

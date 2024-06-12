@@ -91,6 +91,10 @@ func (b *EthAPIBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumb
 		}
 		return block, nil
 	}
+	if number == rpc.EarliestBlockNumber {
+		earliestNumber := b.eth.blockchain.HeaderChain().EarliestHeight()
+		return b.eth.blockchain.GetHeaderByNumber(earliestNumber), nil
+	}
 	return b.eth.blockchain.GetHeaderByNumber(uint64(number)), nil
 }
 
@@ -142,6 +146,10 @@ func (b *EthAPIBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumbe
 			return nil, errors.New("safe block not found")
 		}
 		return b.eth.blockchain.GetBlock(header.Hash(), header.Number.Uint64()), nil
+	}
+	if number == rpc.EarliestBlockNumber {
+		earliestNumber := b.eth.blockchain.HeaderChain().EarliestHeight()
+		return b.eth.blockchain.GetBlockByNumber(earliestNumber), nil
 	}
 	return b.eth.blockchain.GetBlockByNumber(uint64(number)), nil
 }
@@ -424,6 +432,10 @@ func (b *EthAPIBackend) CurrentHeader() *types.Header {
 	return b.eth.blockchain.CurrentHeader()
 }
 
+func (b *EthAPIBackend) EarliestHeader() *types.Header {
+	return b.eth.blockchain.EarliestBlock()
+}
+
 func (b *EthAPIBackend) StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.StateDB, readOnly bool, preferDisk bool) (*state.StateDB, tracers.StateReleaseFunc, error) {
 	return b.eth.stateAtBlock(ctx, block, reexec, base, readOnly, preferDisk)
 }
@@ -431,7 +443,6 @@ func (b *EthAPIBackend) StateAtBlock(ctx context.Context, block *types.Block, re
 func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*types.Transaction, vm.BlockContext, *state.StateDB, tracers.StateReleaseFunc, error) {
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
 }
-
 
 func (b *EthAPIBackend) GetTxBloom(ctx context.Context, hash common.Hash) types.Bloom {
 	raw := b.eth.blockchain.GetTxBloom(hash)
