@@ -31,4 +31,3 @@ It's suggested to create a patch or patches of these changes to make it easier t
 You can do this by repeating steps 1, 3
 
 e.g `git format-patch --stdout 2d772be398d851a62be53d1b0c162c45bb4876e3..c9760f18c15b8d36af7ef1a9bf5b21056f633b71 > build_fixes.patch`
-
