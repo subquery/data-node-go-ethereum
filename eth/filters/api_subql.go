@@ -3,16 +3,19 @@ package filters
 import (
 	"context"
 	"encoding/json"
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rpc"
 	"math"
 	"math/big"
 	"sort"
+
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type BlockResult struct {
@@ -55,9 +58,8 @@ type FieldFilter map[string][]interface{}
 type EntityFilter map[string][]FieldFilter
 
 type SubqlAPI struct {
-	sys           *FilterSystem
-	backend       ethapi.Backend
-	genesisHeader *types.Header
+	sys     *FilterSystem
+	backend ethapi.Backend
 }
 
 type Capability struct {
@@ -112,10 +114,16 @@ func NewSubqlApi(sys *FilterSystem, backend ethapi.Backend) *SubqlAPI {
 	api := &SubqlAPI{
 		sys,
 		backend,
-		nil,
 	}
 
 	return api
+}
+
+// This is an alias for `admin_getDesiredConfig`
+func (api *SubqlAPI) DataInfo(ctx context.Context) (*params.ChainDataConfig, error) {
+	config := rawdb.ReadChainDataConfig(api.backend.ChainDb())
+
+	return config, nil
 }
 
 func (api *SubqlAPI) FilterBlocksCapabilities(ctx context.Context) (*Capability, error) {
@@ -127,19 +135,16 @@ func (api *SubqlAPI) FilterBlocksCapabilities(ctx context.Context) (*Capability,
 		SupportedResponses: []string{"basic", "complete"},
 	}
 
-	err := api.getGenesisHeader(ctx)
-	if err != nil {
-		return nil, err
-	}
+	earliestHeader := api.backend.EarliestHeader()
 
 	res.AvailableBlocks = []struct {
 		StartHeight int `json:"startHeight"`
 		EndHeight   int `json:"endHeight"`
 	}{
-		{StartHeight: int(api.genesisHeader.Number.Uint64()), EndHeight: int(api.endHeight())},
+		{StartHeight: int(earliestHeader.Number.Uint64()), EndHeight: int(api.endHeight())},
 	}
 
-	res.GenesisHash = api.genesisHeader.Hash().Hex()
+	res.GenesisHash = earliestHeader.Hash().Hex()
 	res.ChainId = api.backend.ChainConfig().ChainID.String()
 
 	return res, nil
@@ -148,13 +153,8 @@ func (api *SubqlAPI) FilterBlocksCapabilities(ctx context.Context) (*Capability,
 func (api *SubqlAPI) FilterBlocks(ctx context.Context, blockFilter BlockFilter) (*BlockResult, error) {
 	// TODO validate block range within endHeight
 
-	err := api.getGenesisHeader(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	result := &BlockResult{
-		GenesisHash: api.genesisHeader.Hash().Hex(),
+		GenesisHash: api.backend.EarliestHeader().Hash().Hex(),
 	}
 
 	logResults := []*types.Log{}
@@ -195,6 +195,7 @@ func (api *SubqlAPI) FilterBlocks(ctx context.Context, blockFilter BlockFilter) 
 		}
 	}
 
+	var err error
 	result.Blocks, err = api.buildBlocks(ctx, txResults, logResults, blockFilter.Limit, blockFilter.FieldSelector)
 	if err != nil {
 		return nil, err
@@ -205,10 +206,6 @@ func (api *SubqlAPI) FilterBlocks(ctx context.Context, blockFilter BlockFilter) 
 		(*hexutil.Big)(blockFilter.FromBlock),
 		(*hexutil.Big)(big.NewInt(int64(api.endHeight()))),
 	}
-	// result.BlockRange = [2]*hexutil.Big{
-	// 	result.Blocks[0].Header.Number,
-	// 	result.Blocks[len(result.Blocks)-1].Header.Number,
-	// }
 
 	log.Info("NUM RESULTS", "txs", len(txResults), "logs", len(logResults), "blocks", len(result.Blocks))
 
@@ -312,7 +309,7 @@ func (api *SubqlAPI) blocksAddTx(ctx context.Context, blocks *blocks, tx *ethapi
 	num := tx.BlockNumber.ToInt().Uint64()
 	b, ok := (*blocks)[num]
 	if !ok {
-		header, err := api.sys.backend.HeaderByNumber(ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()))
+		header, err := api.backend.HeaderByNumber(ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()))
 		if err != nil {
 			return err
 		}
@@ -332,7 +329,7 @@ func (api *SubqlAPI) blocksAddTx(ctx context.Context, blocks *blocks, tx *ethapi
 func (api *SubqlAPI) blocksAddLog(ctx context.Context, blocks *blocks, log *types.Log) error {
 	b, ok := (*blocks)[log.BlockNumber]
 	if !ok {
-		header, err := api.sys.backend.HeaderByNumber(ctx, rpc.BlockNumber(log.BlockNumber))
+		header, err := api.backend.HeaderByNumber(ctx, rpc.BlockNumber(log.BlockNumber))
 		if err != nil {
 			return err
 		}
@@ -349,23 +346,10 @@ func (api *SubqlAPI) blocksAddLog(ctx context.Context, blocks *blocks, log *type
 	return nil
 }
 
-func (api *SubqlAPI) getGenesisHeader(ctx context.Context) error {
-	if api.genesisHeader == nil {
-		header, err := api.backend.HeaderByNumber(ctx, rpc.EarliestBlockNumber)
-		if err != nil {
-			return err
-		}
-		api.genesisHeader = header
-	}
-
-	return nil
-}
-
-// endHeight gets the minimum indexed height of transactions and logs bloombits
+// endHeight gets the current indexed height.
 func (api *SubqlAPI) endHeight() uint64 {
-	sizeTx, sectionsTx := api.backend.TxBloomStatus()
-	sizeL, sectionsL := api.backend.BloomStatus()
-	return uint64(math.Min(float64(sizeTx*sectionsTx), float64(sizeL*sectionsL)))
+	// TODO(stwiname) this could be limited to the bloom indexers progress but with sharding if the end is set then it never indexes to the end
+	return api.backend.CurrentBlock().Number.Uint64()
 }
 
 type BlockFilter struct {
